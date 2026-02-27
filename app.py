@@ -182,6 +182,10 @@ with st.sidebar.expander("Labor Market", expanded=False):
         5, 60, int(preset.layoff_speed * 100),
         help="How fast redundant workers are actually laid off",
     )
+    new_job_rate = st.slider(
+        "New AI Job Creation", 0, 100, int(preset.new_job_creation_rate * 100),
+        help="How fast AI creates new job categories (trainers, AI-augmented roles, new businesses)",
+    )
 
 # Policy
 with st.sidebar.expander("Policy Response", expanded=False):
@@ -215,6 +219,10 @@ with st.sidebar.expander("Advanced", expanded=False):
         int(preset.agent_adoption_midpoint_quarter),
         help="Quarter at which 50% of consumers use AI agents",
     )
+    ai_deflation = st.slider(
+        "AI Deflation Effect", 0, 20, int(preset.ai_deflation_rate * 1000),
+        help="How much AI adoption reduces consumer prices (per mille/quarter)",
+    )
 
 # Build params
 params = SimulationParams(
@@ -231,6 +239,8 @@ params = SimulationParams(
     confidence_sensitivity=confidence_sens,
     margin_pressure_ai_feedback=feedback_strength,
     agent_adoption_midpoint_quarter=agent_midpoint,
+    new_job_creation_rate=new_job_rate / 100,
+    ai_deflation_rate=ai_deflation / 1000,
 )
 
 # ── Run simulation ───────────────────────────────────────────────────
@@ -251,8 +261,6 @@ st.markdown(
 last = n - 1
 gdp_chg = (results.gdp[last] - results.gdp[0]) / results.gdp[0] * 100
 sp_chg = (results.sp500[last] - results.sp500[0]) / results.sp500[0] * 100
-sp_peak = np.max(results.sp500)
-sp_dd_max = (np.min(results.sp500[1:]) - sp_peak) / sp_peak * 100
 emp_lost = results.total_employment[0] - results.total_employment[last]
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -264,7 +272,8 @@ c2.metric(
     delta_color="inverse",
 )
 c3.metric("S&P 500", f"{results.sp500[last]:,.0f}", f"{sp_chg:+.1f}%")
-c4.metric("Max S&P Drawdown", f"{sp_dd_max:.1f}%")
+c4.metric("Wellbeing Index", f"{results.wellbeing_index[last]:.0f}/100",
+          f"{results.wellbeing_index[last] - results.wellbeing_index[0]:+.0f}")
 c5.metric("Jobs Lost (M)", f"{emp_lost:.1f}")
 c6.metric(
     "Mortgage Delinq.",
@@ -286,6 +295,15 @@ tab_overview, tab_sectors, tab_financial, tab_policy, tab_ai = st.tabs(
 
 # ── TAB: Overview ────────────────────────────────────────────────────
 with tab_overview:
+    st.plotly_chart(
+        line_chart(
+            labels, results.wellbeing_index,
+            "Human Wellbeing Index (0-100)", "Index", color="#e45756",
+            milestones=results.milestones, labels=labels,
+        ),
+        use_container_width=True,
+    )
+
     col1, col2 = st.columns(2)
     with col1:
         st.plotly_chart(
@@ -349,12 +367,15 @@ with tab_sectors:
             use_container_width=True,
         )
 
-        # Total jobs displaced
+        # Jobs displaced vs created
         st.plotly_chart(
-            line_chart(
-                labels, results.total_jobs_displaced,
-                "Cumulative Jobs Displaced (Millions)", "Millions",
-                color="#d62728",
+            multi_line(
+                labels,
+                {
+                    "Jobs Displaced": results.total_jobs_displaced,
+                    "New AI-Economy Jobs": results.new_ai_jobs,
+                },
+                "Jobs Displaced vs New AI Jobs (Millions)", "Millions",
             ),
             use_container_width=True,
         )
@@ -421,13 +442,23 @@ with tab_financial:
             use_container_width=True,
         )
 
-    st.plotly_chart(
-        line_chart(
-            labels, results.savings_rate * 100,
-            "Household Savings Rate (%)", "%", color="#bcbd22",
-        ),
-        use_container_width=True,
-    )
+    col3, col4 = st.columns(2)
+    with col3:
+        st.plotly_chart(
+            line_chart(
+                labels, results.savings_rate * 100,
+                "Household Savings Rate (%)", "%", color="#bcbd22",
+            ),
+            use_container_width=True,
+        )
+    with col4:
+        st.plotly_chart(
+            line_chart(
+                labels, results.purchasing_power * 100,
+                "Purchasing Power (100 = 2025 dollar)", "%", color="#2ca02c",
+            ),
+            use_container_width=True,
+        )
 
 # ── TAB: Policy & Inequality ────────────────────────────────────────
 with tab_policy:
@@ -459,8 +490,8 @@ with tab_policy:
         )
         st.plotly_chart(
             line_chart(
-                labels, results.agent_adoption * 100,
-                "AI Agent Commerce Adoption (%)", "%", color="#2ca02c",
+                labels, results.fed_funds_rate * 100,
+                "Fed Funds Rate (%)", "%", color="#2ca02c",
             ),
             use_container_width=True,
         )
@@ -480,6 +511,8 @@ with tab_policy:
             confidence_sensitivity=params.confidence_sensitivity,
             margin_pressure_ai_feedback=params.margin_pressure_ai_feedback,
             agent_adoption_midpoint_quarter=params.agent_adoption_midpoint_quarter,
+            ai_deflation_rate=params.ai_deflation_rate,
+            new_job_creation_rate=params.new_job_creation_rate,
             # No policy
             ubi_monthly_per_person=0,
             compute_tax_rate=0,
@@ -488,12 +521,14 @@ with tab_policy:
         baseline = EconomySimulator(params=baseline_params).run()
         bl = len(baseline.labels) - 1
 
-        pc1, pc2, pc3, pc4 = st.columns(4)
+        pc0, pc1, pc2, pc3, pc4 = st.columns(5)
+        hwi_diff = results.wellbeing_index[last] - baseline.wellbeing_index[bl]
         ur_diff = (results.unemployment_rate[last] - baseline.unemployment_rate[bl]) * 100
         gdp_diff = (results.gdp[last] - baseline.gdp[bl]) / baseline.gdp[bl] * 100
         sp_diff = (results.sp500[last] - baseline.sp500[bl]) / baseline.sp500[bl] * 100
         md_diff = (results.mortgage_delinquency[last] - baseline.mortgage_delinquency[bl]) * 100
 
+        pc0.metric("Wellbeing vs No Policy", f"{hwi_diff:+.1f}")
         pc1.metric("Unemployment vs No Policy", f"{ur_diff:+.1f}pp")
         pc2.metric("GDP vs No Policy", f"{gdp_diff:+.1f}%")
         pc3.metric("S&P vs No Policy", f"{sp_diff:+.1f}%")

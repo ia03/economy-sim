@@ -21,6 +21,19 @@ Models the key feedback loops from Citrini Research's
 
 6. Intermediation Collapse
    AI agents -> friction removal -> intermediation revenue collapses
+
+And three positive channels that can offset the crisis:
+
+7. AI Deflation
+   AI reduces production costs -> consumer prices fall -> purchasing power rises
+
+8. New Job Creation
+   AI capability growth -> new economic categories emerge (AI trainers,
+   AI-augmented services, prompt engineers, etc.)
+
+9. Monetary Policy Response
+   Fed cuts rates in response to unemployment/deflation -> stabilizes
+   investment, housing, and asset prices
 """
 
 import numpy as np
@@ -32,6 +45,22 @@ from .config import SectorConfig, SimulationParams, DEFAULT_SECTORS, quarter_lab
 # Total compensation is ~1.76x base salary (benefits, employer taxes, etc.)
 # This maps displayed wages to the total labor share of GDP (~56%)
 COMPENSATION_MULTIPLIER = 1.76
+
+
+def _compute_hwi(income_ratio, unemployment_rate, gini_val,
+                 mortgage_delinq, home_price_idx, savings_rate_val):
+    """Human Wellbeing Index (0-100) — composite welfare metric."""
+    clamp = lambda x: max(0.0, min(100.0, x))
+    income      = max(0.0, min(150.0, income_ratio * 100))
+    employment  = clamp(100 - max(0, unemployment_rate - 0.04) * 667)
+    equality    = clamp((0.70 - gini_val) / 0.30 * 100)
+    mort_sub    = clamp((0.15 - mortgage_delinq) / 0.135 * 100)
+    hpi_sub     = clamp((home_price_idx - 40) / 60 * 100)
+    housing     = 0.6 * mort_sub + 0.4 * hpi_sub
+    security    = clamp(100 - abs(savings_rate_val - 0.05) * 500)
+    raw = (0.30*income + 0.25*employment + 0.20*equality
+         + 0.15*housing + 0.10*security)
+    return max(0.0, min(100.0, raw * 0.84))  # calibrate start ~75
 
 
 @dataclass
@@ -71,6 +100,13 @@ class SimulationResults:
     # Derived
     total_jobs_displaced: np.ndarray
     ai_investment: np.ndarray
+    wellbeing_index: np.ndarray
+
+    # Positive channels
+    price_level: np.ndarray
+    purchasing_power: np.ndarray
+    fed_funds_rate: np.ndarray
+    new_ai_jobs: np.ndarray
 
     # Milestones: list of (quarter_index, label)
     milestones: List[tuple]
@@ -121,6 +157,10 @@ class EconomySimulator:
         agent_adopt = np.zeros(n)
         jobs_displaced = np.zeros(n)
         ai_invest = np.zeros(n)
+        hwi = np.zeros(n)
+        price_lvl = np.zeros(n)
+        fed_rate = np.zeros(n)
+        new_ai_jobs = np.zeros(n)
 
         milestones = []
         milestone_flags = set()
@@ -167,6 +207,13 @@ class EconomySimulator:
         sav_rate[0] = p.base_savings_rate
         agent_adopt[0] = 0.02
         gdp_growth[0] = 0.025
+        price_lvl[0] = 1.0
+        fed_rate[0] = 0.045  # 4.5% starting Fed funds rate
+
+        hwi[0] = _compute_hwi(
+            1.0, unemp_rate[0], gini[0],
+            mort_delinq[0], home_px[0], sav_rate[0],
+        )
 
         cumulative_displaced = 0.0
 
@@ -175,6 +222,10 @@ class EconomySimulator:
         # "High earners used their higher-than-average savings to maintain
         # the appearance of normalcy for two or three quarters."
         spending_labor_inc = labor_inc[0]
+
+        # Smoothed UBI income — new policy takes 2-3 quarters to fully
+        # affect spending (phase-in, behavioral adjustment, confidence).
+        spending_ubi = 0.0
 
         # --- Simulation loop ---
         for t in range(p.num_quarters):
@@ -204,11 +255,35 @@ class EconomySimulator:
             fin_stress = max(0, mort_delinq[t] - 0.02) * p.credit_tightening_feedback
 
             # ============================================================
+            # 2b. MONETARY POLICY (Fed responds to lagged data)
+            # ============================================================
+            # Simple Taylor-inspired rule: cut rates when unemployment
+            # exceeds 4% target or when deflation appears.
+            unemp_gap_fed = max(0, unemp_rate[t] - 0.04)
+            if t > 0 and price_lvl[t] < price_lvl[t - 1]:
+                deflation_signal = (price_lvl[t - 1] - price_lvl[t]) / price_lvl[t - 1]
+            else:
+                deflation_signal = 0
+            # Fed tolerates mild deflation (~2%/yr = ~0.5%/qtr) before reacting
+            deflation_excess = max(0, deflation_signal - 0.005)
+            target_rate = max(0.0, 0.045 - unemp_gap_fed * 4.0 - deflation_excess * 10.0)
+            fed_rate[t + 1] = fed_rate[t] + p.fed_response_speed * (target_rate - fed_rate[t])
+            fed_rate[t + 1] = max(0.0, min(0.06, fed_rate[t + 1]))
+
+            # Normalized stimulus: 0 at 4.5%, 1 at 0%
+            rate_stimulus = max(0, (0.045 - fed_rate[t + 1]) / 0.045)
+
+            # ============================================================
             # 3. AGENTIC COMMERCE ADOPTION
             # ============================================================
-            agent_adopt[t + 1] = self._sigmoid(
+            # Time-based S-curve scaled by AI capability growth.
+            # No AI improvement → no agentic commerce adoption.
+            base_agent = self._sigmoid(
                 t + 1, p.agent_adoption_midpoint_quarter, p.agent_adoption_steepness
             )
+            # Capability gate: saturates at 1.0 once AI has doubled
+            cap_gate = min(1.0, max(0, (ai_cap[t + 1] / ai_cap[0]) - 1.0) / 1.0)
+            agent_adopt[t + 1] = base_agent * cap_gate
 
             # ============================================================
             # 4. PER-SECTOR DYNAMICS
@@ -219,7 +294,10 @@ class EconomySimulator:
             for i, sector in enumerate(self.sectors):
                 speed = p.sector_automation_speeds.get(sector.name, 0.3)
 
-                base_rate = speed * 0.015 * np.log1p(ai_eff[t + 1])
+                # Adoption driven by AI IMPROVEMENT above baseline, not
+                # absolute level — no improvement means no new adoption.
+                eff_improvement = max(0, ai_eff[t + 1] - ai_eff[0])
+                base_rate = speed * 0.015 * np.log1p(eff_improvement)
 
                 effective_rate = base_rate * (1 + margin_pressure)
 
@@ -235,7 +313,11 @@ class EconomySimulator:
                 adopt[t + 1, i] = new_adopt
 
                 wc = sector.white_collar_pct
-                target = sector.employment_millions * (1 - new_adopt * wc)
+                # Use adoption DELTA from initial baseline so that the
+                # starting 3% adoption doesn't create phantom job losses.
+                # "No AI" scenario stays stable because delta ≈ 0.
+                adopt_delta = max(0, new_adopt - adopt[0, i])
+                target = emp[0, i] * (1 - adopt_delta * wc)
 
                 gap = emp[t, i] - target
                 if gap > 0:
@@ -293,16 +375,37 @@ class EconomySimulator:
             jobs_displaced[t + 1] = cumulative_displaced
 
             # ============================================================
+            # 5b. NEW AI-ECONOMY JOB CREATION
+            # ============================================================
+            # AI creates new job categories that didn't exist before:
+            # AI trainers, prompt engineers, AI-augmented service providers,
+            # AI maintenance, new AI-enabled businesses, etc.
+            # Like the internet creating Google/Amazon/etc. jobs.
+            cap_ratio = ai_cap[t + 1] / ai_cap[0]
+            # Potential scales with AI capability, caps at ~10% of workforce
+            potential = min(labor_force * 0.10, max(0, (cap_ratio - 1.0) * 1.5))
+            # Education/retraining helps workers fill new roles
+            education_factor = 0.3 + min(0.7, p.retraining_investment / 100.0)
+            # Time lag: new industries take time to form (ramps mid-simulation)
+            time_ramp = self._sigmoid(t + 1, 8, 0.3)
+            new_ai_jobs[t + 1] = potential * education_factor * time_ramp * p.new_job_creation_rate
+
+            # ============================================================
             # 6. AGGREGATE EMPLOYMENT & INCOME
             # ============================================================
-            total_emp[t + 1] = emp[t + 1].sum()
+            total_emp[t + 1] = emp[t + 1].sum() + new_ai_jobs[t + 1]
             unemp_rate[t + 1] = max(0.02, 1 - total_emp[t + 1] / labor_force)
 
             # Total labor compensation with multiplier
+            # New AI-economy wages grow as the sector matures — AI-complementary
+            # work gets more valuable with AI capability (like how tech salaries
+            # grew as the internet matured). $75K base → up to ~$140K.
             wage_inc = sum(
                 emp[t + 1, i] * wage[t + 1, i] for i in range(ns)
             )
-            labor_inc[t + 1] = wage_inc * COMPENSATION_MULTIPLIER
+            new_job_wage = 75.0 * (1 + min(1.0, (ai_cap[t + 1] / ai_cap[0] - 1) * 0.1))
+            new_job_wage_inc = new_ai_jobs[t + 1] * new_job_wage
+            labor_inc[t + 1] = (wage_inc + new_job_wage_inc) * COMPENSATION_MULTIPLIER
 
             # ============================================================
             # 7. CONSUMER SPENDING
@@ -326,10 +429,16 @@ class EconomySimulator:
                 + (1 - smooth_alpha) * spending_labor_inc
             )
 
+            # Smooth UBI: new transfers take time to fully affect spending
+            spending_ubi = (
+                smooth_alpha * ubi_income
+                + (1 - smooth_alpha) * spending_ubi
+            )
+
             gdp_ratio = gdp_arr[t] / gdp_0
             adj_non_labor = non_labor_income * (0.5 + 0.5 * max(0.4, gdp_ratio))
 
-            total_consumer_income = spending_labor_inc + adj_non_labor + ubi_income
+            total_consumer_income = spending_labor_inc + adj_non_labor + spending_ubi
             cons_spend[t + 1] = total_consumer_income * (1 - sr) * confidence
 
             interm_loss = (
@@ -343,10 +452,21 @@ class EconomySimulator:
             ai_inv = labor_savings * 0.25
             ai_invest[t + 1] = ai_inv
 
-            other_inv = invest_0 * (0.7 + 0.3 * confidence)
+            # Business investment is highly cyclical — the "investment
+            # accelerator" means capex swings 2-3x more than GDP.
+            # Use prior-quarter GDP ratio + unemployment, not mild
+            # consumer confidence (which barely moves).
+            gdp_ratio_inv = gdp_arr[t] / gdp_0
+            inv_sentiment = max(0.30, gdp_ratio_inv - unemp_excess * 1.5)
+            # Fed rate cuts stimulate business investment
+            other_inv = invest_0 * inv_sentiment * (1 + rate_stimulus * 0.10)
 
             auto_stab = unemp_excess * gdp_0 * 0.02
-            gov_spend = gov_spend_0 + auto_stab + ubi_income
+            # Government PURCHASES (G in GDP = C+I+G+NX): excludes transfer
+            # payments like UBI since those flow through consumer spending (C).
+            gov_purchases = gov_spend_0 + auto_stab
+            # Total fiscal outlay (for deficit calculation): includes transfers
+            gov_total_spending = gov_purchases + ubi_income
 
             # AI PRODUCTIVITY BOOST ("Ghost GDP")
             # AI augments remaining workers AND autonomously replaces lost
@@ -367,16 +487,16 @@ class EconomySimulator:
             # Saturating productivity boost: high early returns, diminishing later
             raw_boost = (1 - np.exp(-net_adoption * 3.0)) * 0.30 * gdp_0
             # Demand dampening: can't sell output nobody can afford to buy
-            demand_base = cons_spend[t + 1] + ai_inv + other_inv + gov_spend
+            demand_base = cons_spend[t + 1] + ai_inv + other_inv + gov_purchases
             demand_ratio = demand_base / (cons_spend_0 + invest_0 + gov_spend_0)
-            demand_damper = min(1.0, 0.3 + demand_ratio * 0.7)
+            demand_damper = min(1.0, max(0, demand_ratio) ** 1.2)
             ai_productivity_boost = raw_boost * demand_damper
 
             gdp_arr[t + 1] = (
                 cons_spend[t + 1]
                 + ai_inv
                 + other_inv
-                + gov_spend
+                + gov_purchases  # G = government purchases (not transfers)
                 + net_exports_0
                 + ai_productivity_boost
                 - interm_loss
@@ -389,24 +509,48 @@ class EconomySimulator:
                 gdp_growth[t + 1] = 0
 
             # ============================================================
+            # 8b. AI-DRIVEN DEFLATION
+            # ============================================================
+            # AI cost-effectiveness (capability/cost) compounds exponentially
+            # and directly drives down production costs → consumer prices.
+            # Log scaling: 2x efficiency → modest, 100x → very significant.
+            # Gated by adoption (need actual deployment, not just capability).
+            eff_ratio = ai_eff[t + 1] / ai_eff[0]
+            deflation_potential = np.log(max(1.0, eff_ratio)) * 0.002
+            adoption_gate = min(1.0, net_adoption / 0.20)
+            ai_deflation_qtr = min(0.02, deflation_potential * adoption_gate
+                                   * (p.ai_deflation_rate / 0.006))
+            price_lvl[t + 1] = max(0.60, price_lvl[t] * (1 - ai_deflation_qtr))
+
+            # ============================================================
             # 9. FINANCIAL INDICATORS
             # ============================================================
             labor_share[t + 1] = labor_inc[t + 1] / max(gdp_arr[t + 1], 1)
 
             # Mortgage delinquency
-            inc_decline = max(
+            # People pay mortgages from ALL income (labor + UBI + non-labor).
+            # Deflation means fixed payments are easier to meet.
+            # Use real total consumer income for mortgage stress, not just
+            # nominal labor income — otherwise UBI and deflation are invisible.
+            real_total_income_ratio = (total_consumer_income / total_consumer_income_0) / price_lvl[t + 1]
+            real_inc_decline = max(0, 1 - real_total_income_ratio)
+            # Keep labor-only decline for Gini (measures market income inequality)
+            labor_inc_decline = max(
                 0, (labor_inc[0] - labor_inc[t + 1]) / labor_inc[0]
             )
-            md = 0.015 + inc_decline * p.mortgage_stress_sensitivity
+            md = 0.015 + real_inc_decline * p.mortgage_stress_sensitivity
             md += unemp_excess * 0.12
+            # Fed rate cuts reduce mortgage stress (refinancing, lower payments)
+            md -= rate_stimulus * 0.005
             mort_delinq[t + 1] = min(0.15, max(0.01, md))
 
-            # Home prices
+            # Home prices — driven by what buyers can actually afford (real income)
             delinq_pressure = max(0, mort_delinq[t + 1] - 0.02)
-            inc_factor = labor_inc[t + 1] / labor_inc[0]
+            inc_factor = real_total_income_ratio
             qtr_price_chg = (
                 (inc_factor - 1) * p.home_price_income_sensitivity * 0.15
-                - delinq_pressure * 0.8
+                - delinq_pressure * 0.4  # 2008 was ~27% national; 0.8 was too aggressive
+                + rate_stimulus * 0.005  # low rates support home prices
             )
             qtr_price_chg = max(-0.06, min(0.03, qtr_price_chg))
             home_px[t + 1] = max(40, home_px[t] * (1 + qtr_price_chg))
@@ -417,12 +561,16 @@ class EconomySimulator:
             # Later: Demand destruction hits GDP → profits eventually fall
             corp_profits = gdp_arr[t + 1] - labor_inc[t + 1]
             init_profits = gdp_0 - labor_inc[0]
-            earnings_ratio = max(0.3, corp_profits / max(init_profits, 1))
+            # Discount profits that come from fiscal stimulus (UBI, auto-stabilizers)
+            # — the market doesn't capitalize transfer-fueled revenue at full multiple
+            fiscal_stimulus = auto_stab + ubi_income
+            organic_profits = corp_profits - fiscal_stimulus * 0.5
+            earnings_ratio = max(0.3, organic_profits / max(init_profits, 1))
 
-            # AI euphoria: builds as capability grows, peaks early, then erodes
-            # as macro deterioration overwhelms the AI narrative
-            quarters_in = t + 1
-            raw_euphoria = min(1.30, 1.0 + 0.04 * min(quarters_in, 8))
+            # AI euphoria: builds with actual AI capability growth, not just
+            # time. "No AI" scenario (flat capability) gets no euphoria.
+            cap_growth = (ai_cap[t + 1] / ai_cap[0]) - 1.0  # cumulative growth
+            raw_euphoria = min(1.30, 1.0 + cap_growth * 0.08)
             # Euphoria erodes with unemployment and mortgage stress
             euphoria_erosion = (
                 unemp_excess * 3.0
@@ -449,21 +597,37 @@ class EconomySimulator:
             peak = np.max(sp500[: t + 2])
             sp500_dd[t + 1] = (sp500[t + 1] - peak) / peak if peak > 0 else 0
 
-            # Federal deficit
+            # Federal deficit (uses total fiscal outlay including transfers)
             corp_profits = gdp_arr[t + 1] - labor_inc[t + 1]
             income_tax = labor_inc[t + 1] * 0.14
             corp_tax = max(0, corp_profits) * 0.08
             compute_tax_rev = ai_inv * p.compute_tax_rate
             total_receipts = income_tax + corp_tax + compute_tax_rev
-            deficit = gov_spend - total_receipts
+            deficit = gov_total_spending - total_receipts
             deficit_pct[t + 1] = -deficit / max(gdp_arr[t + 1], 1)
 
-            # Gini
-            g = 0.49 + inc_decline * 0.8 + unemp_excess * 1.0
+            # Gini — reduced coefficients so scenarios differentiate
+            # instead of all hitting the 0.70 cap
+            # Uses labor income decline (market inequality), not total income
+            # UBI directly reduces inequality (it's income redistribution)
+            ubi_equality_boost = min(0.04, (ubi_income / total_consumer_income_0) * 0.2)
+            g = 0.49 + labor_inc_decline * 0.4 + unemp_excess * 0.5 - ubi_equality_boost
             gini[t + 1] = min(0.70, max(0.40, g))
 
             # ============================================================
-            # 10. MILESTONE EVENTS
+            # 10. HUMAN WELLBEING INDEX
+            # ============================================================
+            # Use REAL income: nominal income / price level. If AI makes
+            # everything cheaper, each dollar of income buys more.
+            real_income_ratio = (total_consumer_income / total_consumer_income_0) / price_lvl[t + 1]
+            hwi[t + 1] = _compute_hwi(
+                real_income_ratio,
+                unemp_rate[t + 1], gini[t + 1],
+                mort_delinq[t + 1], home_px[t + 1], sav_rate[t + 1],
+            )
+
+            # ============================================================
+            # 11. MILESTONE EVENTS
             # ============================================================
             ur = unemp_rate[t + 1]
             dd = sp500_dd[t + 1]
@@ -496,6 +660,15 @@ class EconomySimulator:
                     (t + 1, "Labor share of GDP falls to report's 46% level")
                 )
                 milestone_flags.add("labor_46")
+            if hwi[t + 1] < 65 and "hwi_65" not in milestone_flags:
+                milestones.append((t + 1, "Wellbeing Index: notable decline (<65)"))
+                milestone_flags.add("hwi_65")
+            if hwi[t + 1] < 50 and "hwi_50" not in milestone_flags:
+                milestones.append((t + 1, "Wellbeing Index: crisis level (<50)"))
+                milestone_flags.add("hwi_50")
+            if hwi[t + 1] < 40 and "hwi_40" not in milestone_flags:
+                milestones.append((t + 1, "Wellbeing Index: severe crisis (<40)"))
+                milestone_flags.add("hwi_40")
 
         # --- Build results ---
         labels = quarter_labels(p.num_quarters, p.start_year)
@@ -526,5 +699,10 @@ class EconomySimulator:
             agent_adoption=agent_adopt,
             total_jobs_displaced=jobs_displaced,
             ai_investment=ai_invest,
+            wellbeing_index=hwi,
+            price_level=price_lvl,
+            purchasing_power=1.0 / price_lvl,
+            fed_funds_rate=fed_rate,
+            new_ai_jobs=new_ai_jobs,
             milestones=milestones,
         )

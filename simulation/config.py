@@ -73,7 +73,7 @@ class SimulationParams:
     # --- Consumer Behavior ---
     base_savings_rate: float = 0.05
     precautionary_savings_sensitivity: float = 0.8
-    confidence_sensitivity: float = 1.5
+    confidence_sensitivity: float = 0.5
 
     # --- Agentic Commerce ---
     agent_adoption_midpoint_quarter: float = 10.0  # quarter when 50% adopt
@@ -90,6 +90,11 @@ class SimulationParams:
     ubi_monthly_per_person: float = 0.0
     compute_tax_rate: float = 0.0
     retraining_investment: float = 0.0  # $B/year
+
+    # --- AI Positive Channels ---
+    ai_deflation_rate: float = 0.006  # max quarterly price decline from AI adoption
+    new_job_creation_rate: float = 0.5  # 0-1: how fast AI economy creates new roles
+    fed_response_speed: float = 0.25  # how aggressively the Fed adjusts rates
 
     # --- Feedback Loop Strength ---
     margin_pressure_ai_feedback: float = 0.3
@@ -108,7 +113,7 @@ SCENARIO_PRESETS: Dict[str, SimulationParams] = {
         ai_cost_quarterly_decline=0.08,
         worker_redeployment_rate=0.25,
         displaced_wage_penalty=0.25,
-        confidence_sensitivity=1.0,
+        confidence_sensitivity=0.3,
     ),
     "Aggressive Policy Response": SimulationParams(
         ubi_monthly_per_person=1000,
@@ -128,6 +133,18 @@ SCENARIO_PRESETS: Dict[str, SimulationParams] = {
             "Government & Education": 0.20,
             "Other Services": 0.40,
         },
+    ),
+    "AI Prosperity": SimulationParams(
+        ai_capability_quarterly_growth=0.10,
+        ai_cost_quarterly_decline=0.12,
+        worker_redeployment_rate=0.25,
+        displaced_wage_penalty=0.25,
+        ubi_monthly_per_person=1500,
+        compute_tax_rate=0.10,
+        retraining_investment=150,
+        new_job_creation_rate=1.0,
+        ai_deflation_rate=0.010,
+        margin_pressure_ai_feedback=0.15,
     ),
     "Soft Landing": SimulationParams(
         ai_capability_quarterly_growth=0.08,
