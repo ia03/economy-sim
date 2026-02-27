@@ -154,9 +154,9 @@ SCENARIO_PRESETS: Dict[str, SimulationParams] = {
         ai_cost_quarterly_decline=0.10,
         worker_redeployment_rate=0.30,
         displaced_wage_penalty=0.20,
-        ubi_monthly_per_person=500,
+        ubi_monthly_per_person=750,
         compute_tax_rate=0.05,
-        retraining_investment=30,
+        retraining_investment=50,
         margin_pressure_ai_feedback=0.15,
     ),
 }

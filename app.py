@@ -628,7 +628,7 @@ This is a quarterly system dynamics model with nine interacting feedback loops:
             "1.5%", "0.49",
             "6,000", "0.015/qtr base",
             "6% of GDP", "30% of GDP max",
-            "667", "0.84",
+            "500", "0.84",
         ],
         "Source / Reasoning": [
             "BEA: US nominal GDP ~$29T in 2025",
@@ -642,8 +642,8 @@ This is a quarterly system dynamics model with nine interacting feedback loops:
             "Calibrated: baseline reaches ~40-50% adoption in tech by 2030",
             "Calibrated to Citrini's '6% of GDP in intermediation revenue'",
             "Calibrated to Citrini: 'mid-to-high single-digit growth'",
-            "Scaling: 19pp unemployment excess → score = 0 (Great Depression level)",
-            "Chosen so 2025 baseline starts at ~75 ('good but not great')",
+            "Scaling: 24pp unemployment excess → score = 0 (Great Depression level)",
+            "Chosen so 2025 baseline starts at ~79 ('good but not great')",
         ],
     }
     st.dataframe(pd.DataFrame(cal_data), hide_index=True, use_container_width=True)

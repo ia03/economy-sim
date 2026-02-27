@@ -692,12 +692,22 @@ class EconomySimulator:
             # Uses labor income decline (market inequality), not total income.
             # UBI directly reduces inequality (income redistribution).
             # New AI jobs and tight labor markets can also reduce inequality.
-            ubi_equality_boost = min(0.04, (ubi_income / total_consumer_income_0) * 0.2)
+            # UBI directly reduces inequality via redistribution. $1500/mo
+            # to every adult is ~$4.7T/year — massive income transfer.
+            # Real-world studies: unconditional transfers can reduce Gini
+            # by 0.05-0.10 (Hanna & Olken 2018, GiveDirectly trials).
+            ubi_equality_boost = min(0.10, (ubi_income / total_consumer_income_0) * 0.5)
+            # UBI also dampens the labor income decline's inequality
+            # effect: when transfers replace lost wages, functional
+            # inequality (what people can actually buy) rises less than
+            # market inequality (labor-only income distribution).
+            ubi_share = ubi_income / total_consumer_income_0
+            labor_gini_coeff = 0.4 * max(0.3, 1 - ubi_share * 2)
             # Broadly accessible new AI-economy jobs reduce inequality
             new_job_equality = min(0.03, new_ai_jobs[t + 1] / labor_force * 0.5)
             # Below-4% unemployment gives workers bargaining power
             tight_labor_bonus = max(0, 0.04 - unemp_rate[t + 1]) * 0.8
-            g = (0.49 + labor_inc_decline * 0.4 + unemp_excess * 0.5
+            g = (0.49 + labor_inc_decline * labor_gini_coeff + unemp_excess * 0.5
                  - ubi_equality_boost - new_job_equality - tight_labor_bonus)
             gini[t + 1] = min(0.70, max(0.35, g))  # floor 0.35 (Nordic-level)
 
