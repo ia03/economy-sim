@@ -119,7 +119,9 @@ SCENARIO_PRESETS: Dict[str, SimulationParams] = {
     "Aggressive Policy Response": SimulationParams(
         ubi_monthly_per_person=1000,
         compute_tax_rate=0.10,
-        retraining_investment=50,
+        retraining_investment=75,
+        worker_redeployment_rate=0.25,
+        new_job_creation_rate=0.65,
     ),
     "Accelerated Disruption": SimulationParams(
         ai_capability_quarterly_growth=0.18,
