@@ -585,31 +585,168 @@ with tab_ai:
 
 # ── TAB: Methodology ─────────────────────────────────────────────────
 with tab_method:
-    st.header("Model Structure")
+    st.header("Model Overview")
     st.markdown("""
-This is a quarterly system dynamics model with nine interacting feedback loops:
+This is a **quarterly system dynamics model** simulating the US economy from Q1 2025 to Q1 2031 (24 quarters).
+It tracks how AI-driven automation cascades through employment, wages, consumer spending, financial markets,
+and government finances — and how policy interventions like UBI can change the trajectory.
 
-1. **Intelligence Displacement Spiral** — AI improves → jobs displaced → savings reinvested in AI → AI improves
-2. **Consumer Demand Loop** — Job losses → spending falls → revenues fall → more AI to cut costs
-3. **Wage Compression** — Displaced workers flood service sector → economy-wide wage decline
-4. **Financial Stress** — Income impairment → mortgage stress → wealth effect → spending decline
-5. **Fiscal Pressure** — Tax receipts fall as labor share drops → deficit widens
-6. **Intermediation Collapse** — AI agents remove friction → intermediation revenue collapses
-7. **AI Deflation** — AI reduces production costs → consumer prices fall → purchasing power rises
-8. **New Job Creation** — AI capability growth → new economic categories emerge
-9. **Monetary Policy Response** — Fed cuts rates in response to unemployment/deflation → stabilizes investment and housing
+The model runs on **nine interacting feedback loops** — six negative (crisis-driving) and three positive (stabilizing):
+""")
+    neg_col, pos_col = st.columns(2)
+    with neg_col:
+        st.markdown("""
+**Crisis loops:**
+1. **Intelligence Displacement** — AI improves → jobs displaced → savings reinvested in AI → AI improves further
+2. **Consumer Demand** — Job losses → spending falls → revenues fall → companies adopt more AI to cut costs
+3. **Wage Compression** — Displaced white-collar workers flood service sector → economy-wide wage decline
+4. **Financial Stress** — Income loss → mortgage delinquency → home prices fall → spending declines further
+5. **Fiscal Pressure** — Tax receipts fall as labor share drops → deficit widens → fiscal drag on confidence
+6. **Intermediation Collapse** — AI agents remove friction → intermediation revenue (6% of GDP) collapses
+""")
+    with pos_col:
+        st.markdown("""
+**Stabilizing loops:**
+7. **AI Deflation** — AI reduces production costs → consumer prices fall → purchasing power rises (each dollar buys more)
+8. **New Job Creation** — AI capability → new economic categories emerge (AI trainers, AI-augmented services, new businesses)
+9. **Monetary Policy** — Fed cuts rates in response to unemployment/deflation → supports housing, investment, and asset prices
 """)
 
-    st.header("Key Assumptions")
+    st.header("Human Wellbeing Index (HWI)")
     st.markdown("""
-- AI capability grows exponentially with S-curve saturation at physical limits
-- Eight US economic sectors with distinct automation profiles (white-collar and blue-collar exposure)
-- AI creates both cognitive and physical automation (physical lags cognitive by ~2-3 years as robotics matures)
-- Consumer spending follows income with 2-3 quarter lag (savings buffer)
-- Fed follows a Taylor-inspired rule (responds to unemployment gap and deflation)
-- Supply-constrained economy: excess demand creates inflation, not output
-- New AI-economy jobs emerge with a time lag (new industries take time to form)
-- Inequality can improve when labor markets are tight and new jobs are broadly accessible
+The HWI is the model's **primary output metric** — a composite 0-100 score capturing how well the average American
+is actually doing, beyond just GDP. It combines five components with weights chosen to reflect their importance
+to everyday life:
+
+| Component | Weight | What it measures | Score = 0 when... | Score = 100 when... |
+|---|---|---|---|---|
+| **Income** | 30% | Real purchasing power (nominal income / price level) | Income drops to zero | Income at or above 2025 level |
+| **Employment** | 25% | Job availability, cushioned by UBI | ~24% unemployment (Great Depression) | Unemployment at or below 4% |
+| **Equality** | 20% | Income distribution (Gini coefficient) | Gini reaches 0.70 (extreme inequality) | Gini at 0.40 (developed-nation average) |
+| **Housing** | 15% | Mortgage stress (60%) + home prices (40%) | Mortgage delinquency at 15% | Delinquency at baseline, stable prices |
+| **Security** | 10% | Financial savings buffer | Savings rate drops to 0% | Savings rate at 5%+ |
+
+**How UBI affects HWI**: UBI cushions the employment component — with $1,500/mo UBI, the pain of unemployment is halved
+because people can still cover basic expenses. Being unemployed with UBI is not the same as being destitute.
+UBI also reduces inequality (the equality component) by redistributing income from capital to all citizens.
+
+The 2025 baseline starts at **~79/100** ("good but not great" — reflecting real challenges in today's economy).
+A 0.84 calibration factor maps the raw score to this starting point.
+""")
+
+    st.header("Economic Sectors")
+    st.markdown("""
+The model divides the US economy into **eight sectors** totaling ~158 million workers, each with distinct
+automation characteristics:
+""")
+    sector_table = {
+        "Sector": [s.name for s in DEFAULT_SECTORS],
+        "Employment (M)": [f"{s.employment_millions:.0f}" for s in DEFAULT_SECTORS],
+        "Avg Wage ($K)": [f"${s.avg_annual_wage_k:.0f}K" for s in DEFAULT_SECTORS],
+        "Automation Susceptibility": [f"{s.automation_susceptibility:.0%}" for s in DEFAULT_SECTORS],
+        "White-Collar %": [f"{s.white_collar_pct:.0%}" for s in DEFAULT_SECTORS],
+    }
+    st.dataframe(pd.DataFrame(sector_table), hide_index=True, use_container_width=True)
+    st.markdown("""
+**White-collar vs blue-collar automation**: White-collar tasks (cognitive, information-processing) are automated first
+via LLMs and AI agents. Blue-collar tasks (physical, manual) follow 2-3 years later as robotics matures.
+At full physical maturity, 50% of blue-collar workers in automatable roles are exposed.
+
+**Organizational friction**: Even when AI is technically capable, adoption is capped at **4 percentage points per quarter**
+(enterprises need time for procurement, integration, and change management). Similarly, layoffs are capped at
+**3% of a sector's workforce per quarter** (notice periods, labor law, institutional inertia). These constraints
+prevent unrealistic "disruption cliffs" and match observed enterprise adoption speeds.
+""")
+
+    st.header("AI Dynamics")
+    st.markdown("""
+- **Capability growth**: Exponential with S-curve saturation at a theoretical ceiling (physical/algorithmic limits).
+  Baseline: 12%/quarter (~60%/year), reaching ~15x initial capability by 2031.
+- **Cost decline**: AI inference costs drop 15%/quarter (baseline). A compute tax slows this by up to 50%.
+- **Effectiveness**: Capability / Cost — this ratio drives adoption decisions. It compounds rapidly:
+  by 2031, AI is ~15x more capable AND ~35x cheaper, making it ~500x more cost-effective.
+- **Adoption**: Each sector adopts AI based on effectiveness improvements, sector-specific speed, and automation susceptibility.
+  Adoption is measured as the fraction of tasks in a sector performed by AI (0% to sector maximum).
+""")
+
+    st.header("Labor Market Dynamics")
+    st.markdown("""
+When AI adoption displaces workers, three mechanisms determine the employment outcome:
+
+1. **Displacement**: As AI adoption increases, the employment target for each sector drops. Workers are laid off
+   at the `layoff speed` rate (default 25% of the gap per quarter, capped by organizational friction).
+
+2. **Redeployment**: Displaced workers can move to low-automation sectors (Healthcare, Manufacturing, Government).
+   The redeployment rate determines what fraction find new work each quarter. Retraining investment boosts this
+   (with diminishing returns — $25B gets you halfway, $100B gets most of the benefit). As AI adoption spreads
+   economy-wide, even "safe" sectors have less room, reducing absorption capacity.
+
+3. **New AI-economy jobs**: AI creates entirely new job categories — AI trainers, prompt engineers, AI-augmented
+   service providers, AI maintenance, new AI-enabled businesses. The ceiling and growth rate scale with the
+   `new job creation rate` parameter. Even at maximum, new jobs take time to emerge (S-curve with midpoint at Q8).
+
+**Wage dynamics**: Displaced workers who find new roles take a wage penalty (default 40% pay cut). Wages in
+sectors with labor surpluses decline gradually (capped at 3% per quarter). This creates broad wage compression.
+""")
+
+    st.header("GDP & the 'Ghost GDP' Effect")
+    st.markdown("""
+GDP is computed as: **C + I + G + NX + AI Productivity Boost**
+
+| Component | Description |
+|---|---|
+| **C** (Consumer Spending) | Labor income + non-labor income + UBI, adjusted for savings rate and confidence. Follows income with a 2-3 quarter lag (savings buffer). |
+| **I** (Investment) | Business investment (cyclical, responds to GDP growth and Fed rates) + AI investment (25% of labor cost savings redirected to AI). |
+| **G** (Government) | Government purchases (20% of GDP baseline) + automatic stabilizers. UBI is a *transfer* and flows through C, not G. |
+| **NX** (Net Exports) | Trade deficit baseline (-6% GDP) + AI export boost (US AI leadership) + import adjustment. |
+| **AI Productivity** | The key innovation — AI autonomously replaces lost output. This "Ghost GDP" shows up in national accounts as corporate profits but never circulates through households. Saturating at 30% of GDP. Dampened when demand is weak (can't sell output nobody can afford). |
+
+The AI productivity boost is why **GDP can grow while employment falls** — this is a central finding of the Citrini report.
+Corporate profits soar as AI replaces labor, but the gains accrue to capital owners, not workers. Without policy
+intervention (UBI, compute tax), this creates a growing disconnect between GDP and human welfare.
+""")
+
+    st.header("Policy Mechanisms")
+    st.markdown("""
+Three policy levers are available, each working through different channels:
+
+**Universal Basic Income (UBI)**
+- Provides monthly cash to every adult (~260M Americans)
+- Flows through consumer spending (C) with a 2-3 quarter phase-in
+- Cushions the HWI employment component (unemployed with UBI ≠ destitute)
+- Directly reduces Gini coefficient (income redistribution)
+- Dampens the labor income decline's effect on inequality
+- Cost: $1,500/mo = ~$4.7T/year (~16% of GDP)
+
+**Compute Tax**
+- Tax on AI compute spending (applied to AI investment)
+- Slows AI cost decline by up to 50% (makes automation less attractive at the margin)
+- Generates revenue to partially offset UBI costs
+- Does NOT stop AI capability growth — just slows the cost incentive
+
+**Retraining Investment**
+- Government spending on worker retraining programs
+- Boosts redeployment rate (diminishing returns: sqrt scaling)
+- Helps workers fill new AI-economy roles (education factor)
+- $25B gets ~50% of max benefit; $100B gets ~100%
+""")
+
+    st.header("Financial Market Model")
+    st.markdown("""
+**S&P 500**: Driven by corporate earnings (GDP minus labor income), AI euphoria, and risk premiums.
+Early in the simulation, AI-driven profit growth creates euphoria and a rally. Later, if demand destruction
+hits, earnings fall and risk premiums rise, causing a correction. In policy scenarios, sustained earnings
+growth keeps markets elevated.
+
+**Mortgage delinquency**: Driven by real income decline (labor + UBI + non-labor, adjusted for deflation)
+and unemployment. Fed rate cuts provide relief through refinancing. UBI income helps people pay mortgages.
+
+**Home prices**: Driven by buyer affordability (real income), mortgage stress, and interest rates.
+Low rates and UBI support prices; high delinquency drags them down.
+
+**Federal deficit**: Government spending (purchases + UBI + auto-stabilizers) minus tax receipts
+(income tax + corporate tax + compute tax). UBI is expensive — $1,500/mo creates an immediate ~16% of GDP
+fiscal cost. This is partially offset by compute tax revenue and higher GDP.
 """)
 
     st.header("Calibration Sources")
@@ -648,9 +785,23 @@ This is a quarterly system dynamics model with nine interacting feedback loops:
     }
     st.dataframe(pd.DataFrame(cal_data), hide_index=True, use_container_width=True)
 
+    st.header("Key Assumptions")
+    st.markdown("""
+- AI capability grows exponentially with S-curve saturation at physical limits
+- Eight US economic sectors with distinct automation profiles (white-collar and blue-collar exposure)
+- Physical automation (robotics) lags cognitive automation by ~2-3 years
+- Consumer spending follows income with 2-3 quarter lag (savings buffer)
+- Fed follows a Taylor-inspired rule (responds to unemployment gap and deflation)
+- Supply-constrained economy: excess demand creates inflation, not real output
+- New AI-economy jobs emerge with a time lag (S-curve, new industries take time to form)
+- UBI directly reduces inequality (income redistribution) and dampens the labor income decline's inequality effect
+- Organizational friction caps both AI adoption speed and layoff speed per sector
+""")
+
     st.header("Known Limitations")
     st.markdown("""
 - **No forward-looking expectations**: Agents react to current conditions, don't anticipate. No rational expectations or adaptive learning.
+- **Fixed policy**: UBI and other policy settings are constant throughout the simulation. In reality, governments would adapt policy as conditions change.
 - **Closed economy with simplified trade**: No exchange rates or trade policy dynamics. Net exports respond to AI leadership but omit global competition effects.
 - **No banking/credit channel**: Mortgage stress is modeled but there are no bank failures or credit crunch cascades.
 - **No agent heterogeneity**: Single representative consumer per sector. No income distribution within sectors, no geographic variation.
