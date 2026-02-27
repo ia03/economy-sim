@@ -31,6 +31,14 @@ st.set_page_config(
 COLORS = px.colors.qualitative.Set2
 SECTOR_COLORS = {s.name: COLORS[i % len(COLORS)] for i, s in enumerate(DEFAULT_SECTORS)}
 
+# Common layout for all charts — dark theme with transparent background
+CHART_THEME = dict(
+    template="plotly_dark",
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(color="#fafafa"),
+)
+
 
 # ── Helper: build line chart ─────────────────────────────────────────
 def line_chart(
@@ -55,6 +63,7 @@ def line_chart(
                     bordercolor="#666", borderwidth=1,
                 )
     fig.update_layout(
+        **CHART_THEME,
         title=dict(text=title, font=dict(size=14)),
         yaxis_title=yaxis, height=320,
         margin=dict(l=50, r=20, t=35, b=30),
@@ -74,6 +83,7 @@ def area_chart_sectors(x, employment, sector_names):
             )
         )
     fig.update_layout(
+        **CHART_THEME,
         title=dict(text="Employment by Sector (Millions)", font=dict(size=14)),
         yaxis_title="Millions", height=380,
         margin=dict(l=50, r=20, t=35, b=30),
@@ -93,6 +103,7 @@ def multi_line(x, series_dict, title, yaxis, height=340):
             )
         )
     fig.update_layout(
+        **CHART_THEME,
         title=dict(text=title, font=dict(size=14)),
         yaxis_title=yaxis, height=height,
         margin=dict(l=50, r=20, t=35, b=30),
