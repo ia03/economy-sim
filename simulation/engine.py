@@ -233,7 +233,11 @@ class EconomySimulator:
             # ============================================================
             # 1. AI CAPABILITY AND COST
             # ============================================================
-            ai_cap[t + 1] = ai_cap[t] * (1 + p.ai_capability_quarterly_growth)
+            # S-curve saturation: growth slows as capability approaches
+            # physical/algorithmic ceiling (inspired by GATE model's CMOS
+            # limits). Barely noticeable over 6 years, dominant over 25+.
+            saturation = max(0.0, 1.0 - (ai_cap[t] / p.ai_capability_ceiling) ** 2)
+            ai_cap[t + 1] = ai_cap[t] * (1 + p.ai_capability_quarterly_growth * saturation)
 
             eff_cost_decline = p.ai_cost_quarterly_decline * (
                 1 - p.compute_tax_rate * 0.5

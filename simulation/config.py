@@ -50,6 +50,7 @@ class SimulationParams:
     # --- AI Dynamics ---
     ai_capability_quarterly_growth: float = 0.12  # 12%/quarter (~60%/year)
     ai_cost_quarterly_decline: float = 0.15  # 15% cost reduction/quarter
+    ai_capability_ceiling: float = 100.0  # theoretical max (multiple of initial); physical/algorithmic limits
 
     # --- Per-Sector Automation Speed ---
     # 0.0 = no automation, 1.0 = maximum speed
