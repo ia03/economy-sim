@@ -31,12 +31,12 @@ st.set_page_config(
 COLORS = px.colors.qualitative.Set2
 SECTOR_COLORS = {s.name: COLORS[i % len(COLORS)] for i, s in enumerate(DEFAULT_SECTORS)}
 
-# Common layout for all charts — dark theme with transparent background
+# Common layout for all charts
 CHART_THEME = dict(
-    template="plotly_dark",
+    template="simple_white",
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="#fafafa"),
+    font=dict(color="#262730"),
 )
 
 
