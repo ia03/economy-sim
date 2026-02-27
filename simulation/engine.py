@@ -333,6 +333,13 @@ class EconomySimulator:
                         agent_adopt[t + 1] * 0.012 * sector.automation_susceptibility
                     )
 
+                # Adoption friction: even when AI is capable, enterprises
+                # need time for procurement, integration, testing, change
+                # management, and regulatory compliance. Cap quarterly
+                # adoption increase at 4pp — roughly what cloud computing
+                # achieved at peak enterprise adoption speed.
+                effective_rate = min(effective_rate, 0.04)
+
                 new_adopt = min(
                     sector.automation_susceptibility,
                     adopt[t, i] + effective_rate,
@@ -355,7 +362,13 @@ class EconomySimulator:
 
                 gap = emp[t, i] - target
                 if gap > 0:
-                    layoffs = gap * p.layoff_speed
+                    # Organizational friction: notice periods, regulatory
+                    # requirements, and institutional inertia cap how fast
+                    # any sector can shed workers. 2008 crisis peak was
+                    # ~2.5% of employment/quarter economy-wide; AI disruption
+                    # is faster but still constrained by labor law and logistics.
+                    max_layoffs = emp[0, i] * 0.03
+                    layoffs = min(gap * p.layoff_speed, max_layoffs)
                     emp[t + 1, i] = emp[t, i] - layoffs
                     quarter_displaced += layoffs
                     displaced_wage_total += layoffs * wage[t, i]
