@@ -349,7 +349,9 @@ class EconomySimulator:
 
             remaining = quarter_displaced
 
-            retrain_boost = min(0.10, p.retraining_investment / 100.0)
+            # Diminishing returns: sqrt scaling — $25B gets you 50% of max,
+            # $100B gets ~100%, $400B gets ~200% (but still capped at 15%)
+            retrain_boost = min(0.15, 0.01 * np.sqrt(max(0, p.retraining_investment)))
             eff_redeploy = p.worker_redeployment_rate + retrain_boost
 
             absorb_order = sorted(
@@ -384,8 +386,8 @@ class EconomySimulator:
             cap_ratio = ai_cap[t + 1] / ai_cap[0]
             # Potential scales with AI capability, caps at ~10% of workforce
             potential = min(labor_force * 0.10, max(0, (cap_ratio - 1.0) * 1.5))
-            # Education/retraining helps workers fill new roles
-            education_factor = 0.3 + min(0.7, p.retraining_investment / 100.0)
+            # Education/retraining helps workers fill new roles (sqrt diminishing returns)
+            education_factor = 0.3 + min(0.7, 0.05 * np.sqrt(max(0, p.retraining_investment)))
             # Time lag: new industries take time to form (ramps mid-simulation)
             time_ramp = self._sigmoid(t + 1, 8, 0.3)
             new_ai_jobs[t + 1] = potential * education_factor * time_ramp * p.new_job_creation_rate
@@ -416,7 +418,14 @@ class EconomySimulator:
             sr = min(0.20, sr)
             sav_rate[t + 1] = sr
 
-            confidence = max(0.50, 1.0 - unemp_excess * p.confidence_sensitivity)
+            # Fiscal drag: extreme deficits erode confidence and crowd out
+            # investment. Tolerate up to ~15% deficit/GDP (wartime levels);
+            # beyond that, bond markets and inflation expectations push back.
+            prior_deficit_ratio = -deficit_pct[t]  # positive = deficit
+            fiscal_drag = max(0, (prior_deficit_ratio - 0.15) * 1.0)
+            fiscal_drag = min(0.25, fiscal_drag)
+
+            confidence = max(0.50, 1.0 - unemp_excess * p.confidence_sensitivity - fiscal_drag)
 
             # UBI: $/month * 12 months * 260M adults → $B/year
             ubi_income = p.ubi_monthly_per_person * 12.0 * 260.0 / 1000.0
@@ -441,6 +450,18 @@ class EconomySimulator:
             total_consumer_income = spending_labor_inc + adj_non_labor + spending_ubi
             cons_spend[t + 1] = total_consumer_income * (1 - sr) * confidence
 
+            # Supply constraint: the economy has finite productive capacity.
+            # AI increases capacity, but you can't buy goods that don't exist.
+            # Excess demand above capacity creates inflation, not real output.
+            ai_supply_boost = 1 + min(1.0, (ai_cap[t + 1] / ai_cap[0] - 1) * 0.15)
+            supply_cap = cons_spend_0 * ai_supply_boost * 1.3  # 30% above AI-augmented baseline
+            demand_inflation_qtr = 0.0
+            if cons_spend[t + 1] > supply_cap:
+                excess = cons_spend[t + 1] - supply_cap
+                demand_inflation_qtr = min(0.10, (excess / supply_cap) * 0.15)
+                # Only tiny fraction of excess becomes real spending; rest is inflation
+                cons_spend[t + 1] = supply_cap + excess * 0.05
+
             interm_loss = (
                 agent_adopt[t + 1] * p.intermediation_gdp_fraction * gdp_arr[t]
             )
@@ -458,8 +479,10 @@ class EconomySimulator:
             # consumer confidence (which barely moves).
             gdp_ratio_inv = gdp_arr[t] / gdp_0
             inv_sentiment = max(0.30, gdp_ratio_inv - unemp_excess * 1.5)
-            # Fed rate cuts stimulate business investment
-            other_inv = invest_0 * inv_sentiment * (1 + rate_stimulus * 0.10)
+            # Fed rate cuts stimulate business investment; fiscal drag crowds out
+            crowding_out = max(0, (prior_deficit_ratio - 0.15) * 0.8)
+            crowding_out = min(0.20, crowding_out)
+            other_inv = invest_0 * inv_sentiment * (1 + rate_stimulus * 0.10) * (1 - crowding_out)
 
             auto_stab = unemp_excess * gdp_0 * 0.02
             # Government PURCHASES (G in GDP = C+I+G+NX): excludes transfer
@@ -520,7 +543,8 @@ class EconomySimulator:
             adoption_gate = min(1.0, net_adoption / 0.20)
             ai_deflation_qtr = min(0.02, deflation_potential * adoption_gate
                                    * (p.ai_deflation_rate / 0.006))
-            price_lvl[t + 1] = max(0.60, price_lvl[t] * (1 - ai_deflation_qtr))
+            # Net price change: AI deflation vs demand-pull inflation
+            price_lvl[t + 1] = max(0.60, price_lvl[t] * (1 - ai_deflation_qtr + demand_inflation_qtr))
 
             # ============================================================
             # 9. FINANCIAL INDICATORS
