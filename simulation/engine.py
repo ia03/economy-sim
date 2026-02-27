@@ -298,6 +298,14 @@ class EconomySimulator:
             quarter_displaced = 0.0
             displaced_wage_total = 0.0
 
+            # Demand-side employment pressure: when GDP falls
+            # significantly, companies cut headcount even without
+            # automation — revenue decline forces cost cutting.
+            # Uses 1-quarter lag (gdp_arr[t]) for stability.
+            # 5% threshold avoids noise-driven layoffs.
+            gdp_shortfall = max(0, 1 - gdp_arr[t] / gdp_0 - 0.05)
+            demand_reduction = gdp_shortfall * 0.15
+
             for i, sector in enumerate(self.sectors):
                 speed = p.sector_automation_speeds.get(sector.name, 0.3)
 
@@ -333,7 +341,7 @@ class EconomySimulator:
                 # At maturity, 50% of blue-collar workers in automatable roles exposed.
                 physical_maturity = min(1.0, max(0, (ai_cap[t + 1] / ai_cap[0] - 3.0)) / 6.0)
                 exposed_fraction = wc + (1 - wc) * physical_maturity * 0.5
-                target = emp[0, i] * (1 - adopt_delta * exposed_fraction)
+                target = emp[0, i] * (1 - adopt_delta * exposed_fraction) * (1 - demand_reduction)
 
                 gap = emp[t, i] - target
                 if gap > 0:
@@ -378,7 +386,11 @@ class EconomySimulator:
                     break
                 s = self.sectors[i]
                 if s.automation_susceptibility < 0.5:
-                    capacity = emp[t + 1, i] * 0.015
+                    # Absorption capacity scales with redeployment effort:
+                    # at default (eff_redeploy≈0.15) → 1.5%/qtr (unchanged);
+                    # at high effort (0.50) → 5%/qtr. This prevents the
+                    # capacity constraint from making the slider useless.
+                    capacity = emp[t + 1, i] * 0.015 * (eff_redeploy / 0.15)
                     absorbed = min(remaining * eff_redeploy, capacity)
                     if absorbed > 0:
                         old_bill = emp[t + 1, i] * wage[t + 1, i]
