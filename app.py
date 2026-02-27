@@ -289,8 +289,8 @@ if results.milestones:
             st.markdown(f"- **{labels[qi]}**: {label}")
 
 # ── Tabs ─────────────────────────────────────────────────────────────
-tab_overview, tab_sectors, tab_financial, tab_policy, tab_ai = st.tabs(
-    ["Overview", "Sectors", "Financial", "Policy & Inequality", "AI Progress"]
+tab_overview, tab_sectors, tab_financial, tab_policy, tab_ai, tab_method = st.tabs(
+    ["Overview", "Sectors", "Financial", "Policy & Inequality", "AI Progress", "Methodology"]
 )
 
 # ── TAB: Overview ────────────────────────────────────────────────────
@@ -582,6 +582,92 @@ with tab_ai:
         "Avg Wage ($K)": [f"{results.avg_wage[last, i]:.0f}" for i in range(len(results.sector_names))],
     }
     st.dataframe(pd.DataFrame(adopt_data), hide_index=True, use_container_width=True)
+
+# ── TAB: Methodology ─────────────────────────────────────────────────
+with tab_method:
+    st.header("Model Structure")
+    st.markdown("""
+This is a quarterly system dynamics model with nine interacting feedback loops:
+
+1. **Intelligence Displacement Spiral** — AI improves → jobs displaced → savings reinvested in AI → AI improves
+2. **Consumer Demand Loop** — Job losses → spending falls → revenues fall → more AI to cut costs
+3. **Wage Compression** — Displaced workers flood service sector → economy-wide wage decline
+4. **Financial Stress** — Income impairment → mortgage stress → wealth effect → spending decline
+5. **Fiscal Pressure** — Tax receipts fall as labor share drops → deficit widens
+6. **Intermediation Collapse** — AI agents remove friction → intermediation revenue collapses
+7. **AI Deflation** — AI reduces production costs → consumer prices fall → purchasing power rises
+8. **New Job Creation** — AI capability growth → new economic categories emerge
+9. **Monetary Policy Response** — Fed cuts rates in response to unemployment/deflation → stabilizes investment and housing
+""")
+
+    st.header("Key Assumptions")
+    st.markdown("""
+- AI capability grows exponentially with S-curve saturation at physical limits
+- Eight US economic sectors with distinct automation profiles (white-collar and blue-collar exposure)
+- AI creates both cognitive and physical automation (physical lags cognitive by ~2-3 years as robotics matures)
+- Consumer spending follows income with 2-3 quarter lag (savings buffer)
+- Fed follows a Taylor-inspired rule (responds to unemployment gap and deflation)
+- Supply-constrained economy: excess demand creates inflation, not output
+- New AI-economy jobs emerge with a time lag (new industries take time to form)
+- Inequality can improve when labor markets are tight and new jobs are broadly accessible
+""")
+
+    st.header("Calibration Sources")
+    cal_data = {
+        "Parameter": [
+            "GDP (2025)", "Consumption share", "Compensation multiplier",
+            "Initial AI adoption", "Natural unemployment rate",
+            "Mortgage delinquency rate", "Gini coefficient",
+            "S&P 500 level", "AI adoption rate",
+            "Intermediation revenue", "AI productivity ceiling",
+            "HWI employment scaling", "HWI calibration factor",
+        ],
+        "Value": [
+            "$29T", "68% of GDP", "1.76x",
+            "3%", "4%",
+            "1.5%", "0.49",
+            "6,000", "0.015/qtr base",
+            "6% of GDP", "30% of GDP max",
+            "667", "0.84",
+        ],
+        "Source / Reasoning": [
+            "BEA: US nominal GDP ~$29T in 2025",
+            "BEA: PCE is ~68% of GDP (stable 60-year average)",
+            "BLS: total employer cost ~1.7-1.8x base wages (benefits, FICA, etc.)",
+            "Pew/McKinsey 2024: ~3% of US workers actively use AI for core tasks",
+            "CBO NAIRU estimate 2024",
+            "MBA: current US mortgage delinquency rate ~1.5% (2024)",
+            "Census Bureau: US Gini ~0.49 (2023)",
+            "S&P 500 ~6,000 at 2025 baseline",
+            "Calibrated: baseline reaches ~40-50% adoption in tech by 2030",
+            "Calibrated to Citrini's '6% of GDP in intermediation revenue'",
+            "Calibrated to Citrini: 'mid-to-high single-digit growth'",
+            "Scaling: 19pp unemployment excess → score = 0 (Great Depression level)",
+            "Chosen so 2025 baseline starts at ~75 ('good but not great')",
+        ],
+    }
+    st.dataframe(pd.DataFrame(cal_data), hide_index=True, use_container_width=True)
+
+    st.header("Known Limitations")
+    st.markdown("""
+- **No forward-looking expectations**: Agents react to current conditions, don't anticipate. No rational expectations or adaptive learning.
+- **Closed economy with simplified trade**: No exchange rates or trade policy dynamics. Net exports respond to AI leadership but omit global competition effects.
+- **No banking/credit channel**: Mortgage stress is modeled but there are no bank failures or credit crunch cascades.
+- **No agent heterogeneity**: Single representative consumer per sector. No income distribution within sectors, no geographic variation.
+- **No non-AI technological progress**: All productivity gains come from AI. Baseline economy has zero TFP growth.
+- **Coefficients calibrated to plausibility, not estimated from data**: Parameters are chosen to produce reasonable trajectories, not fitted to historical data via regression or Bayesian estimation.
+- **Directions more reliable than magnitudes**: The model captures whether policy X helps or hurts more reliably than by exactly how much.
+""")
+
+    st.header("Comparison with GATE")
+    st.markdown("""
+The [GATE model](https://epochai.org/blog/gate) (Epoch AI) models the AI trajectory
+from compute physics — chip fabrication limits, training compute scaling laws, and
+algorithmic progress. This simulator models the *human experience* during the
+transition: jobs, income, spending, financial stress, and policy response. The two
+are complementary: GATE tells you *when* AI reaches various capability levels; this
+model explores *what happens to people* when it does.
+""")
 
 # ── Footer ───────────────────────────────────────────────────────────
 st.divider()

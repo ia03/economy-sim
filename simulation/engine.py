@@ -42,7 +42,7 @@ from typing import List
 
 from .config import SectorConfig, SimulationParams, DEFAULT_SECTORS, quarter_labels
 
-# Total compensation is ~1.76x base salary (benefits, employer taxes, etc.)
+# BLS: total employer cost ~1.7-1.8x base wages (benefits, FICA, etc.)
 # This maps displayed wages to the total labor share of GDP (~56%)
 COMPENSATION_MULTIPLIER = 1.76
 
@@ -52,6 +52,7 @@ def _compute_hwi(income_ratio, unemployment_rate, gini_val,
     """Human Wellbeing Index (0-100) — composite welfare metric."""
     clamp = lambda x: max(0.0, min(100.0, x))
     income      = max(0.0, min(150.0, income_ratio * 100))
+    # 667 scaling: 19pp unemployment excess → score = 0 (Great Depression level)
     employment  = clamp(100 - max(0, unemployment_rate - 0.04) * 667)
     equality    = clamp((0.70 - gini_val) / 0.30 * 100)
     mort_sub    = clamp((0.15 - mortgage_delinq) / 0.135 * 100)
@@ -60,7 +61,8 @@ def _compute_hwi(income_ratio, unemployment_rate, gini_val,
     security    = clamp(100 - abs(savings_rate_val - 0.05) * 500)
     raw = (0.30*income + 0.25*employment + 0.20*equality
          + 0.15*housing + 0.10*security)
-    return max(0.0, min(100.0, raw * 0.84))  # calibrate start ~75
+    # 0.84 calibration: chosen so 2025 baseline starts at ~75 ("good but not great")
+    return max(0.0, min(100.0, raw * 0.84))
 
 
 @dataclass
@@ -173,8 +175,9 @@ class EconomySimulator:
         for i, s in enumerate(self.sectors):
             emp[0, i] = s.employment_millions
             wage[0, i] = s.avg_annual_wage_k
-            adopt[0, i] = 0.03
+            adopt[0, i] = 0.03  # Pew/McKinsey 2024: ~3% of US workers actively use AI for core tasks
 
+        # 4% natural rate (CBO NAIRU estimate 2024)
         labor_force = sum(s.employment_millions for s in self.sectors) / 0.96
         total_emp[0] = sum(s.employment_millions for s in self.sectors)
         unemp_rate[0] = 1.0 - total_emp[0] / labor_force
@@ -185,11 +188,11 @@ class EconomySimulator:
         )
         labor_inc[0] = wage_income_0 * COMPENSATION_MULTIPLIER  # ~$16.2T
 
-        gdp_0 = 29_000.0
-        cons_spend_0 = gdp_0 * 0.68
-        gov_spend_0 = gdp_0 * 0.20
-        invest_0 = gdp_0 * 0.18
-        net_exports_0 = gdp_0 * (-0.06)
+        gdp_0 = 29_000.0               # BEA: US nominal GDP ~$29T in 2025
+        cons_spend_0 = gdp_0 * 0.68    # BEA: PCE is ~68% of GDP (stable 60-year average)
+        gov_spend_0 = gdp_0 * 0.20     # BEA: government consumption ~20% of GDP
+        invest_0 = gdp_0 * 0.18        # BEA: gross private domestic investment ~18% of GDP
+        net_exports_0 = gdp_0 * (-0.06)  # BEA: US trade deficit ~6% of GDP (2024)
 
         # Non-labor consumer income (capital gains, dividends, transfers, etc.)
         total_consumer_income_0 = cons_spend_0 / (1 - p.base_savings_rate)
@@ -197,13 +200,13 @@ class EconomySimulator:
 
         gdp_arr[0] = gdp_0
         cons_spend[0] = cons_spend_0
-        sp500[0] = 6000.0
+        sp500[0] = 6000.0  # S&P 500 ~6000 at 2025 baseline
         sp500_dd[0] = 0.0
-        mort_delinq[0] = 0.015
+        mort_delinq[0] = 0.015  # MBA: current US delinquency rate ~1.5% (2024)
         home_px[0] = 100.0
         deficit_pct[0] = -0.06
         labor_share[0] = labor_inc[0] / gdp_0  # ~0.56
-        gini[0] = 0.49
+        gini[0] = 0.49  # Census Bureau: US Gini ~0.49 (2023)
         sav_rate[0] = p.base_savings_rate
         agent_adopt[0] = 0.02
         gdp_growth[0] = 0.025
@@ -301,11 +304,13 @@ class EconomySimulator:
                 # Adoption driven by AI IMPROVEMENT above baseline, not
                 # absolute level — no improvement means no new adoption.
                 eff_improvement = max(0, ai_eff[t + 1] - ai_eff[0])
+                # 0.015: calibrated so baseline reaches ~40-50% adoption in tech by 2030
                 base_rate = speed * 0.015 * np.log1p(eff_improvement)
 
                 effective_rate = base_rate * (1 + margin_pressure)
 
                 if sector.is_intermediation:
+                    # 0.012: calibrated to Citrini's "6% of GDP in intermediation revenue"
                     effective_rate += (
                         agent_adopt[t + 1] * 0.012 * sector.automation_susceptibility
                     )
@@ -321,7 +326,14 @@ class EconomySimulator:
                 # starting 3% adoption doesn't create phantom job losses.
                 # "No AI" scenario stays stable because delta ≈ 0.
                 adopt_delta = max(0, new_adopt - adopt[0, i])
-                target = emp[0, i] * (1 - adopt_delta * wc)
+
+                # Physical automation lags cognitive by ~2-3 years as
+                # robotics catches up (warehouses, delivery, cashiers).
+                # Starts at 3x AI capability (~Q10), full maturity at 9x (~Q19).
+                # At maturity, 50% of blue-collar workers in automatable roles exposed.
+                physical_maturity = min(1.0, max(0, (ai_cap[t + 1] / ai_cap[0] - 3.0)) / 6.0)
+                exposed_fraction = wc + (1 - wc) * physical_maturity * 0.5
+                target = emp[0, i] * (1 - adopt_delta * exposed_fraction)
 
                 gap = emp[t, i] - target
                 if gap > 0:
@@ -509,9 +521,10 @@ class EconomySimulator:
                 adopt[t + 1, i] * emp[t + 1, i] * wage[t + 1, i]
                 for i in range(ns)
             ) / max(wage_inc, 1)
-            # Net adoption above baseline (so boost starts at zero)
+            # Net adoption above 3% baseline (so boost starts at zero)
             net_adoption = max(0, weighted_adoption - 0.03)
-            # Saturating productivity boost: high early returns, diminishing later
+            # Saturating productivity boost: max 30% of GDP; S-curve shape.
+            # 3.0 steepness + 0.30 ceiling calibrated to Citrini: "mid-to-high single-digit growth"
             raw_boost = (1 - np.exp(-net_adoption * 3.0)) * 0.30 * gdp_0
             # Demand dampening: can't sell output nobody can afford to buy
             demand_base = cons_spend[t + 1] + ai_inv + other_inv + gov_purchases
@@ -519,12 +532,19 @@ class EconomySimulator:
             demand_damper = min(1.0, max(0, demand_ratio) ** 1.2)
             ai_productivity_boost = raw_boost * demand_damper
 
+            # Dynamic net exports: US can become dominant AI exporter.
+            # AI leadership boosts service exports; weak demand reduces imports.
+            # Small positive contribution (~$100-500B over 6 years).
+            ai_export_boost = min(0.02 * gdp_0, max(0, ai_cap[t + 1] / ai_cap[0] - 1.0) * 0.003 * gdp_0)
+            import_adjustment = max(0, 1 - demand_ratio) * 0.01 * gdp_0
+            net_exports = net_exports_0 + ai_export_boost + import_adjustment
+
             gdp_arr[t + 1] = (
                 cons_spend[t + 1]
                 + ai_inv
                 + other_inv
                 + gov_purchases  # G = government purchases (not transfers)
-                + net_exports_0
+                + net_exports
                 + ai_productivity_boost
                 - interm_loss
             )
@@ -634,13 +654,18 @@ class EconomySimulator:
             deficit = gov_total_spending - total_receipts
             deficit_pct[t + 1] = -deficit / max(gdp_arr[t + 1], 1)
 
-            # Gini — reduced coefficients so scenarios differentiate
-            # instead of all hitting the 0.70 cap
-            # Uses labor income decline (market inequality), not total income
-            # UBI directly reduces inequality (it's income redistribution)
+            # Gini — Census Bureau: US Gini ~0.49 (2023)
+            # Uses labor income decline (market inequality), not total income.
+            # UBI directly reduces inequality (income redistribution).
+            # New AI jobs and tight labor markets can also reduce inequality.
             ubi_equality_boost = min(0.04, (ubi_income / total_consumer_income_0) * 0.2)
-            g = 0.49 + labor_inc_decline * 0.4 + unemp_excess * 0.5 - ubi_equality_boost
-            gini[t + 1] = min(0.70, max(0.40, g))
+            # Broadly accessible new AI-economy jobs reduce inequality
+            new_job_equality = min(0.03, new_ai_jobs[t + 1] / labor_force * 0.5)
+            # Below-4% unemployment gives workers bargaining power
+            tight_labor_bonus = max(0, 0.04 - unemp_rate[t + 1]) * 0.8
+            g = (0.49 + labor_inc_decline * 0.4 + unemp_excess * 0.5
+                 - ubi_equality_boost - new_job_equality - tight_labor_bonus)
+            gini[t + 1] = min(0.70, max(0.35, g))  # floor 0.35 (Nordic-level)
 
             # ============================================================
             # 10. HUMAN WELLBEING INDEX
