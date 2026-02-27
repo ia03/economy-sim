@@ -52,16 +52,21 @@ def _compute_hwi(income_ratio, unemployment_rate, gini_val,
     """Human Wellbeing Index (0-100) — composite welfare metric."""
     clamp = lambda x: max(0.0, min(100.0, x))
     income      = max(0.0, min(150.0, income_ratio * 100))
-    # 667 scaling: 19pp unemployment excess → score = 0 (Great Depression level)
-    employment  = clamp(100 - max(0, unemployment_rate - 0.04) * 667)
+    # 500 scaling: score reaches 0 at ~24% unemployment (Great Depression peak).
+    # Old value (667) hit 0 at 19%, leaving no room to distinguish a severe
+    # recession from a full depression.
+    employment  = clamp(100 - max(0, unemployment_rate - 0.04) * 500)
     equality    = clamp((0.70 - gini_val) / 0.30 * 100)
     mort_sub    = clamp((0.15 - mortgage_delinq) / 0.135 * 100)
     hpi_sub     = clamp((home_price_idx - 40) / 60 * 100)
     housing     = 0.6 * mort_sub + 0.4 * hpi_sub
-    security    = clamp(100 - abs(savings_rate_val - 0.05) * 500)
+    # Only penalize savings depletion (below 5%), not precautionary saving.
+    # High savings from unemployment fear is already captured by the
+    # employment component — penalizing it again double-counts the pain.
+    security    = clamp(min(100.0, savings_rate_val / 0.05 * 100))
     raw = (0.30*income + 0.25*employment + 0.20*equality
          + 0.15*housing + 0.10*security)
-    # 0.84 calibration: chosen so 2025 baseline starts at ~75 ("good but not great")
+    # 0.84 calibration: chosen so 2025 baseline starts at ~79 ("good but not great")
     return max(0.0, min(100.0, raw * 0.84))
 
 
