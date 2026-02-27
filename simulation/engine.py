@@ -400,8 +400,16 @@ class EconomySimulator:
             # AI maintenance, new AI-enabled businesses, etc.
             # Like the internet creating Google/Amazon/etc. jobs.
             cap_ratio = ai_cap[t + 1] / ai_cap[0]
-            # Potential scales with AI capability, caps at ~10% of workforce
-            potential = min(labor_force * 0.10, max(0, (cap_ratio - 1.0) * 1.5))
+            # Ceiling and growth scale with new_job_creation_rate:
+            # rate=0.5 (default) → ~17.5% ceiling, coeff=2.5
+            # rate=1.0 (prosperity) → ~25% ceiling, coeff=3.5
+            # Historical: internet created ~15-20% of US jobs at maturity.
+            job_ceiling_pct = 0.10 + 0.15 * p.new_job_creation_rate
+            growth_coeff = 1.5 + 2.0 * p.new_job_creation_rate
+            potential = min(
+                labor_force * job_ceiling_pct,
+                max(0, (cap_ratio - 1.0) * growth_coeff),
+            )
             # Education/retraining helps workers fill new roles (sqrt diminishing returns)
             education_factor = 0.3 + min(0.7, 0.05 * np.sqrt(max(0, p.retraining_investment)))
             # Time lag: new industries take time to form (ramps mid-simulation)
