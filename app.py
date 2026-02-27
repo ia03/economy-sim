@@ -53,20 +53,25 @@ def line_chart(
         )
     )
     if milestones and labels:
-        for idx, (qi, label) in enumerate(milestones):
+        # Use invisible scatter markers at milestone points so the
+        # label only appears on hover — no permanent clutter.
+        ms_x, ms_y, ms_text = [], [], []
+        for qi, label in milestones:
             if 0 <= qi < len(y):
-                # Alternate annotations left/right and stagger vertically
-                # to avoid overlapping labels
-                side = 1 if idx % 2 == 0 else -1
-                ax = side * 60
-                ay = -30 - (idx % 3) * 25
-                fig.add_annotation(
-                    x=labels[qi], y=y[qi], text=label,
-                    showarrow=True, arrowhead=2, arrowsize=1,
-                    ax=ax, ay=ay, font=dict(size=9),
-                    bgcolor="rgba(255,255,255,0.92)",
-                    bordercolor="#666", borderwidth=1,
+                ms_x.append(labels[qi])
+                ms_y.append(y[qi])
+                ms_text.append(label)
+        if ms_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=ms_x, y=ms_y, mode="markers",
+                    marker=dict(size=9, color="red", symbol="diamond",
+                                line=dict(width=1, color="#333")),
+                    text=ms_text,
+                    hovertemplate="%{text}<extra></extra>",
+                    showlegend=False,
                 )
+            )
     fig.update_layout(
         **CHART_THEME,
         title=dict(text=title, font=dict(size=14)),
