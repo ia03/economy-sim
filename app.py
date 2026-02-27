@@ -659,15 +659,128 @@ This is a quarterly system dynamics model with nine interacting feedback loops:
 - **Directions more reliable than magnitudes**: The model captures whether policy X helps or hurts more reliably than by exactly how much.
 """)
 
-    st.header("Comparison with GATE")
-    st.markdown("""
-The [GATE model](https://epochai.org/blog/gate) (Epoch AI) models the AI trajectory
-from compute physics — chip fabrication limits, training compute scaling laws, and
-algorithmic progress. This simulator models the *human experience* during the
-transition: jobs, income, spending, financial stress, and policy response. The two
-are complementary: GATE tells you *when* AI reaches various capability levels; this
-model explores *what happens to people* when it does.
-""")
+    # ── Sensitivity Analysis ──────────────────────────────────────
+    st.header("Sensitivity Analysis")
+    st.markdown(
+        "Each parameter is varied **±20%** from current settings. "
+        "Bars show how much the output metric changes from baseline."
+    )
+
+    @st.cache_data
+    def run_sensitivity(_params_dict, num_quarters):
+        """Run ±20% sweeps for key parameters and return deltas."""
+        from dataclasses import asdict
+
+        base_params = SimulationParams(**_params_dict, num_quarters=num_quarters)
+        base_result = EconomySimulator(params=base_params).run()
+        bl = len(base_result.labels) - 1
+        base_hwi = base_result.wellbeing_index[bl]
+        base_unemp = base_result.unemployment_rate[bl] * 100
+        base_gdp_chg = (base_result.gdp[bl] - base_result.gdp[0]) / base_result.gdp[0] * 100
+
+        sweep_params = [
+            ("ai_capability_quarterly_growth", "AI Capability Growth"),
+            ("ai_cost_quarterly_decline", "AI Cost Decline"),
+            ("worker_redeployment_rate", "Worker Redeployment"),
+            ("displaced_wage_penalty", "Displaced Wage Penalty"),
+            ("layoff_speed", "Layoff Speed"),
+            ("new_job_creation_rate", "New Job Creation"),
+            ("confidence_sensitivity", "Confidence Sensitivity"),
+            ("ai_deflation_rate", "AI Deflation Rate"),
+        ]
+
+        rows = []
+        for attr, label in sweep_params:
+            base_val = _params_dict[attr]
+            for direction, mult in [("-20%", 0.8), ("+20%", 1.2)]:
+                tweaked = dict(_params_dict)
+                tweaked[attr] = base_val * mult
+                tp = SimulationParams(**tweaked, num_quarters=num_quarters)
+                r = EconomySimulator(params=tp).run()
+                rl = len(r.labels) - 1
+                rows.append({
+                    "param": label,
+                    "direction": direction,
+                    "hwi_delta": r.wellbeing_index[rl] - base_hwi,
+                    "unemp_delta": r.unemployment_rate[rl] * 100 - base_unemp,
+                    "gdp_delta": (r.gdp[rl] - r.gdp[0]) / r.gdp[0] * 100 - base_gdp_chg,
+                })
+        return rows
+
+    # Build a hashable dict of the params we sweep (exclude num_quarters
+    # and non-swept fields so cache key stays stable)
+    _sweep_keys = [
+        "ai_capability_quarterly_growth", "ai_cost_quarterly_decline",
+        "worker_redeployment_rate", "displaced_wage_penalty",
+        "layoff_speed", "new_job_creation_rate",
+        "confidence_sensitivity", "ai_deflation_rate",
+        # Include other params that affect the simulation
+        "ai_capability_ceiling", "base_savings_rate",
+        "precautionary_savings_sensitivity", "wage_flexibility",
+        "agent_adoption_midpoint_quarter", "agent_adoption_steepness",
+        "intermediation_gdp_fraction", "mortgage_stress_sensitivity",
+        "home_price_income_sensitivity", "equity_earnings_weight",
+        "equity_risk_premium_sensitivity", "ubi_monthly_per_person",
+        "compute_tax_rate", "retraining_investment",
+        "fed_response_speed", "margin_pressure_ai_feedback",
+        "credit_tightening_feedback",
+    ]
+    _params_for_sweep = {k: getattr(params, k) for k in _sweep_keys}
+    # Sector automation speeds need special handling (dict → tuple for hashing)
+    _params_for_sweep["sector_automation_speeds"] = params.sector_automation_speeds
+
+    sensitivity_rows = run_sensitivity(_params_for_sweep, params.num_quarters)
+    sens_df = pd.DataFrame(sensitivity_rows)
+
+    def tornado_chart(df, metric_col, title, xaxis_label):
+        """Build a horizontal tornado chart for one output metric."""
+        low = df[df["direction"] == "-20%"][["param", metric_col]].rename(
+            columns={metric_col: "low"}
+        )
+        high = df[df["direction"] == "+20%"][["param", metric_col]].rename(
+            columns={metric_col: "high"}
+        )
+        merged = low.merge(high, on="param")
+        # Sort by total absolute spread (most sensitive at top)
+        merged["spread"] = merged["high"].abs() + merged["low"].abs()
+        merged = merged.sort_values("spread", ascending=True)
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            y=merged["param"], x=merged["low"], name="-20%",
+            orientation="h", marker_color="#4e79a7",
+        ))
+        fig.add_trace(go.Bar(
+            y=merged["param"], x=merged["high"], name="+20%",
+            orientation="h", marker_color="#e15759",
+        ))
+        fig.update_layout(
+            **CHART_THEME,
+            title=dict(text=title, font=dict(size=14)),
+            xaxis_title=xaxis_label,
+            barmode="overlay",
+            height=340,
+            margin=dict(l=160, r=20, t=40, b=30),
+            legend=dict(orientation="h", yanchor="bottom", y=-0.2),
+        )
+        return fig
+
+    tc1, tc2, tc3 = st.columns(3)
+    with tc1:
+        st.plotly_chart(
+            tornado_chart(sens_df, "hwi_delta", "Wellbeing Index", "HWI change"),
+            use_container_width=True,
+        )
+    with tc2:
+        st.plotly_chart(
+            tornado_chart(sens_df, "unemp_delta", "Unemployment Rate", "pp change"),
+            use_container_width=True,
+        )
+    with tc3:
+        st.plotly_chart(
+            tornado_chart(sens_df, "gdp_delta", "GDP Change", "pp change"),
+            use_container_width=True,
+        )
 
 # ── Footer ───────────────────────────────────────────────────────────
 st.divider()

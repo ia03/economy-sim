@@ -351,7 +351,7 @@ class EconomySimulator:
                 )
                 w_pressure = min(
                     p.wage_flexibility,
-                    surplus_ratio * 0.08 + new_adopt * 0.004,
+                    surplus_ratio * 0.08 + adopt_delta * 0.004,
                 )
                 wage[t + 1, i] = wage[t, i] * (1 - w_pressure)
 
