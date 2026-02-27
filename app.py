@@ -53,13 +53,18 @@ def line_chart(
         )
     )
     if milestones and labels:
-        for qi, label in milestones:
+        for idx, (qi, label) in enumerate(milestones):
             if 0 <= qi < len(y):
+                # Alternate annotations left/right and stagger vertically
+                # to avoid overlapping labels
+                side = 1 if idx % 2 == 0 else -1
+                ax = side * 60
+                ay = -30 - (idx % 3) * 25
                 fig.add_annotation(
                     x=labels[qi], y=y[qi], text=label,
                     showarrow=True, arrowhead=2, arrowsize=1,
-                    ax=0, ay=-40, font=dict(size=9),
-                    bgcolor="rgba(255,255,255,0.85)",
+                    ax=ax, ay=ay, font=dict(size=9),
+                    bgcolor="rgba(255,255,255,0.92)",
                     bordercolor="#666", borderwidth=1,
                 )
     fig.update_layout(
