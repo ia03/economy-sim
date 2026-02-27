@@ -48,14 +48,19 @@ COMPENSATION_MULTIPLIER = 1.76
 
 
 def _compute_hwi(income_ratio, unemployment_rate, gini_val,
-                 mortgage_delinq, home_price_idx, savings_rate_val):
+                 mortgage_delinq, home_price_idx, savings_rate_val,
+                 ubi_monthly=0.0):
     """Human Wellbeing Index (0-100) — composite welfare metric."""
     clamp = lambda x: max(0.0, min(100.0, x))
     income      = max(0.0, min(150.0, income_ratio * 100))
     # 500 scaling: score reaches 0 at ~24% unemployment (Great Depression peak).
-    # Old value (667) hit 0 at 19%, leaving no room to distinguish a severe
-    # recession from a full depression.
-    employment  = clamp(100 - max(0, unemployment_rate - 0.04) * 500)
+    # UBI cushions the blow: $1500/mo halves the pain of unemployment because
+    # people can still afford basics. Being unemployed with UBI isn't the same
+    # as being destitute. $3000/mo would fully cushion (but no preset goes
+    # that high). Without UBI, full pain applies.
+    ubi_cushion = min(0.5, ubi_monthly / 3000.0)
+    effective_unemp_excess = max(0, unemployment_rate - 0.04) * (1 - ubi_cushion)
+    employment  = clamp(100 - effective_unemp_excess * 500)
     equality    = clamp((0.70 - gini_val) / 0.30 * 100)
     mort_sub    = clamp((0.15 - mortgage_delinq) / 0.135 * 100)
     hpi_sub     = clamp((home_price_idx - 40) / 60 * 100)
@@ -386,16 +391,19 @@ class EconomySimulator:
             absorb_order = sorted(
                 range(ns), key=lambda idx: self.sectors[idx].automation_susceptibility
             )
+            # As AI adoption spreads economy-wide, even "safe" sectors
+            # automate and have less room for displaced workers.
+            avg_adoption = np.mean(adopt[t + 1])
+            adoption_dampener = max(0.3, 1.0 - avg_adoption)
             for i in absorb_order:
                 if remaining <= 0:
                     break
                 s = self.sectors[i]
                 if s.automation_susceptibility < 0.5:
-                    # Absorption capacity scales with redeployment effort:
-                    # at default (eff_redeploy≈0.15) → 1.5%/qtr (unchanged);
-                    # at high effort (0.50) → 5%/qtr. This prevents the
-                    # capacity constraint from making the slider useless.
-                    capacity = emp[t + 1, i] * 0.015 * (eff_redeploy / 0.15)
+                    # Absorption capacity scales with redeployment effort
+                    # and shrinks as economy-wide adoption rises.
+                    capacity = (emp[t + 1, i] * 0.015
+                                * (eff_redeploy / 0.15) * adoption_dampener)
                     absorbed = min(remaining * eff_redeploy, capacity)
                     if absorbed > 0:
                         old_bill = emp[t + 1, i] * wage[t + 1, i]
@@ -418,11 +426,12 @@ class EconomySimulator:
             # Like the internet creating Google/Amazon/etc. jobs.
             cap_ratio = ai_cap[t + 1] / ai_cap[0]
             # Ceiling and growth scale with new_job_creation_rate:
-            # rate=0.5 (default) → ~17.5% ceiling, coeff=2.5
-            # rate=1.0 (prosperity) → ~25% ceiling, coeff=3.5
-            # Historical: internet created ~15-20% of US jobs at maturity.
-            job_ceiling_pct = 0.10 + 0.15 * p.new_job_creation_rate
-            growth_coeff = 1.5 + 2.0 * p.new_job_creation_rate
+            # rate=0.5 (default) → ~10% ceiling, coeff=1.75
+            # rate=1.0 (prosperity) → ~15% ceiling, coeff=2.5
+            # Conservative: even the internet took 20+ years to create
+            # ~15% of US jobs; AI in 6 years should create fewer.
+            job_ceiling_pct = 0.05 + 0.10 * p.new_job_creation_rate
+            growth_coeff = 1.0 + 1.5 * p.new_job_creation_rate
             potential = min(
                 labor_force * job_ceiling_pct,
                 max(0, (cap_ratio - 1.0) * growth_coeff),
@@ -702,6 +711,7 @@ class EconomySimulator:
                 real_income_ratio,
                 unemp_rate[t + 1], gini[t + 1],
                 mort_delinq[t + 1], home_px[t + 1], sav_rate[t + 1],
+                ubi_monthly=p.ubi_monthly_per_person,
             )
 
             # ============================================================
