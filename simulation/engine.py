@@ -170,6 +170,12 @@ class EconomySimulator:
 
         cumulative_displaced = 0.0
 
+        # Smoothed labor income for consumer spending — models the lag
+        # between job loss and spending cuts. The report describes this:
+        # "High earners used their higher-than-average savings to maintain
+        # the appearance of normalcy for two or three quarters."
+        spending_labor_inc = labor_inc[0]
+
         # --- Simulation loop ---
         for t in range(p.num_quarters):
 
@@ -309,12 +315,21 @@ class EconomySimulator:
 
             confidence = max(0.50, 1.0 - unemp_excess * p.confidence_sensitivity)
 
-            ubi_income = p.ubi_monthly_per_person * 12.0 * 260.0 / 1e6
+            # UBI: $/month * 12 months * 260M adults → $B/year
+            ubi_income = p.ubi_monthly_per_person * 12.0 * 260.0 / 1000.0
+
+            # Smoothed labor income: displaced workers draw down savings
+            # before cutting spending, creating a 2-3 quarter lag
+            smooth_alpha = 0.35
+            spending_labor_inc = (
+                smooth_alpha * labor_inc[t + 1]
+                + (1 - smooth_alpha) * spending_labor_inc
+            )
 
             gdp_ratio = gdp_arr[t] / gdp_0
             adj_non_labor = non_labor_income * (0.5 + 0.5 * max(0.4, gdp_ratio))
 
-            total_consumer_income = labor_inc[t + 1] + adj_non_labor + ubi_income
+            total_consumer_income = spending_labor_inc + adj_non_labor + ubi_income
             cons_spend[t + 1] = total_consumer_income * (1 - sr) * confidence
 
             interm_loss = (
@@ -333,12 +348,29 @@ class EconomySimulator:
             auto_stab = unemp_excess * gdp_0 * 0.02
             gov_spend = gov_spend_0 + auto_stab + ubi_income
 
-            # "Ghost GDP": AI maintains output even as workers are cut.
-            # This output shows up in national accounts (corporate profits)
-            # but doesn't circulate through households as income.
-            # It's what the report calls the disconnect between productivity
-            # and the real consumer economy.
-            ai_output = labor_savings * 0.45
+            # AI PRODUCTIVITY BOOST ("Ghost GDP")
+            # AI augments remaining workers AND autonomously replaces lost
+            # output. This is the report's core insight: "Real output per
+            # hour rose at rates not seen since the 1950s" and "nominal GDP
+            # repeatedly printed mid-to-high single-digit growth" — even as
+            # workers were being laid off. The output shows up in national
+            # accounts as corporate profits but never circulates through
+            # households.
+            #
+            # Weighted average AI adoption across sectors (by income share)
+            weighted_adoption = sum(
+                adopt[t + 1, i] * emp[t + 1, i] * wage[t + 1, i]
+                for i in range(ns)
+            ) / max(wage_inc, 1)
+            # Net adoption above baseline (so boost starts at zero)
+            net_adoption = max(0, weighted_adoption - 0.03)
+            # Saturating productivity boost: high early returns, diminishing later
+            raw_boost = (1 - np.exp(-net_adoption * 3.0)) * 0.30 * gdp_0
+            # Demand dampening: can't sell output nobody can afford to buy
+            demand_base = cons_spend[t + 1] + ai_inv + other_inv + gov_spend
+            demand_ratio = demand_base / (cons_spend_0 + invest_0 + gov_spend_0)
+            demand_damper = min(1.0, 0.3 + demand_ratio * 0.7)
+            ai_productivity_boost = raw_boost * demand_damper
 
             gdp_arr[t + 1] = (
                 cons_spend[t + 1]
@@ -346,7 +378,7 @@ class EconomySimulator:
                 + other_inv
                 + gov_spend
                 + net_exports_0
-                + ai_output
+                + ai_productivity_boost
                 - interm_loss
             )
             gdp_arr[t + 1] = max(gdp_arr[t + 1], gdp_0 * 0.4)
@@ -387,16 +419,25 @@ class EconomySimulator:
             init_profits = gdp_0 - labor_inc[0]
             earnings_ratio = max(0.3, corp_profits / max(init_profits, 1))
 
-            # AI euphoria: builds as capability grows, peaked by confidence in AI narrative
-            # Fades as macro reality sets in (unemployment, financial stress)
+            # AI euphoria: builds as capability grows, peaks early, then erodes
+            # as macro deterioration overwhelms the AI narrative
             quarters_in = t + 1
-            ai_euphoria = min(1.30, 1.0 + 0.04 * min(quarters_in, 8))
+            raw_euphoria = min(1.30, 1.0 + 0.04 * min(quarters_in, 8))
+            # Euphoria erodes with unemployment and mortgage stress
+            euphoria_erosion = (
+                unemp_excess * 3.0
+                + max(0, mort_delinq[t + 1] - 0.03) * 5
+            )
+            ai_euphoria = max(1.0, raw_euphoria - euphoria_erosion)
 
-            # Macro risk premium: rises with unemployment, mortgage stress, etc.
+            # Macro risk premium: rises with unemployment, mortgage stress,
+            # and unsustainable fiscal deficits
+            fiscal_risk = max(0, -deficit_pct[t] - 0.08) * 2  # risk above 8% deficit
             stress = (
                 unemp_excess * 2.0
                 + fin_stress
                 + max(0, mort_delinq[t + 1] - 0.02) * 6
+                + fiscal_risk
             )
             # Net sentiment: euphoria vs fear
             sentiment = max(0.35, ai_euphoria - stress * p.equity_risk_premium_sensitivity)
